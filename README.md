@@ -12,11 +12,21 @@ An appointment booking system with two backend services and a legacy mobile clie
 ```bash
 make doctor     # Check prerequisites
 make up         # Build and start all services
-make test       # Run baseline tests
+make test       # Run unit tests
 make reproduce  # Demonstrate the reported incident
 ```
 
 Requires Docker and Docker Compose. No local Python installation needed.
+
+## Quality Tools
+
+```bash
+make lint        # ruff linter
+make typecheck   # mypy type checker
+make check       # lint + typecheck + unit tests
+```
+
+Keep these green as you work. Add tests for any changes you make.
 
 ## System Overview
 
@@ -27,7 +37,6 @@ Legacy mobile client
         v
 +-------------------+
 |    booking-api    |  :18080
-
 | FastAPI / PG      |
 +-------------------+
         |
@@ -80,7 +89,10 @@ judgment.
 | `make doctor` | Verify Docker and port availability |
 | `make up` | Build and start services with health checks |
 | `make down` | Stop all services |
-| `make test` | Run baseline test suites (< 30s) |
+| `make test` | Run unit test suites (< 30s) |
+| `make lint` | Run ruff linter on both services |
+| `make typecheck` | Run mypy type checker on both services |
+| `make check` | Run lint + typecheck + unit tests |
 | `make reproduce` | Reproduce the duplicate booking incident |
 | `make reset` | Full reset: remove volumes, rebuild, restart |
 | `make logs` | Tail service logs |

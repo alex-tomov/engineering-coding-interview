@@ -1,4 +1,4 @@
-.PHONY: doctor up down test reproduce reset logs
+.PHONY: doctor up down test lint typecheck check reproduce reset logs
 
 doctor:
 	@bash scripts/doctor.sh
@@ -18,6 +18,16 @@ down:
 test:
 	docker compose exec booking-api pytest tests/ -v --tb=short
 	docker compose exec capacity-api pytest tests/ -v --tb=short
+
+lint:
+	docker compose exec booking-api ruff check .
+	docker compose exec capacity-api ruff check .
+
+typecheck:
+	docker compose exec booking-api mypy app/ --ignore-missing-imports
+	docker compose exec capacity-api mypy app/ --ignore-missing-imports
+
+check: lint typecheck test
 
 reproduce:
 	@bash scripts/reproduce.sh
