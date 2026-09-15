@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: challenge
+      POSTGRES_PASSWORD: challenge
+    ports:
+      - "25432:5432"
+    volumes:
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U challenge"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  booking-api:
+    build: ./booking-api
+    ports:
+      - "18080:8000"
+    environment:
+      DATABASE_URL: postgresql://challenge:challenge@postgres:5432/booking_db
+      CAPACITY_API_URL: http://capacity-api:8000
+      CHALLENGE_MODE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      capacity-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  capacity-api:
+    build: ./capacity-api
+    ports:
+      - "18081:8000"
+    environment:
+      DATABASE_URL: postgresql://challenge:challenge@postgres:5432/capacity_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg_data:
