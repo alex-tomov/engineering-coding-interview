@@ -79,6 +79,7 @@ judgment.
 | BUG-1 | Bug | Slots showing as full when fewer bookings than capacity exist |
 | FEAT-1 | Feature | Add cancellation support; product wants to rename "scheduled" to "confirmed" |
 | FEAT-2 | Bug | Two users simultaneously booked the last available slot -- both succeeded |
+| FEAT-3 | Feature | Add a waitlist for fully-booked slots (`POST /api/v1/waitlist`) |
 | TECH-1 | Tech debt | Existing tests pass but may not catch the reported incident |
 | DESIGN-1 | Discussion | What guarantees does the system provide when a downstream call times out? |
 
