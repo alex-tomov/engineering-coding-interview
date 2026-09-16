@@ -8,6 +8,3 @@ build/
 .env
 *.local
 .DS_Store
-SENIOR_BACKEND_INTERVIEW_CHALLENGE.md
-evaluator/
-interviewer/
