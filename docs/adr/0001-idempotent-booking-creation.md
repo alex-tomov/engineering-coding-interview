@@ -64,6 +64,21 @@ Requests **without** an `Idempotency-Key` remain non-idempotent. Postgres treats
 NULLs as distinct in unique constraints, so they are unaffected. Rejecting them
 with a 400 would be safer, but it is a breaking contract change — see below.
 
+An **empty** header value is normalised to absent. Postgres does *not* treat
+`''` as NULL-distinct, so persisting it would trip the unique constraint on the
+user's every subsequent booking — turning a malformed header into a permanent
+500 that also leaked a seat per attempt.
+
+A key replayed with a **different `slot_id`** is rejected (422 at `booking-api`,
+409 at `capacity-api`) rather than replayed. Returning the original booking
+would confirm a slot the user did not choose, and — because `booking-api`
+ignores the reservation body it gets back — would let the two services disagree
+about which seat is held.
+
+The uuid5 input is a JSON-encoded `[user_id, key]` pair rather than
+`f"{user}:{key}"`, since a separator inside either value would otherwise let
+distinct pairs collide on the bookings primary key.
+
 ## Consequences
 
 - A retry now returns **201 with the original booking** rather than creating a
