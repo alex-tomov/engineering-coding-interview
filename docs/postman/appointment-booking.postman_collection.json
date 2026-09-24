@@ -1,0 +1,426 @@
+{
+  "info": {
+    "name": "Appointment Booking System",
+    "description": "Manual test collection for booking-api (:18080) and capacity-api (:18081).\n\nRun `make up` first.\n\nThe **INC-1 Regression** folder is ordered and scripted — run it with the Collection Runner. It reproduces the duplicate-booking incident end to end and asserts the fixed behaviour: one booking, capacity consumed once.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "bookingUrl", "value": "http://localhost:18080" },
+    { "key": "capacityUrl", "value": "http://localhost:18081" },
+    { "key": "userId", "value": "user-postman-001" },
+    { "key": "slotId", "value": "slot-munich-0900" },
+    { "key": "scarceSlotId", "value": "slot-berlin-0900" },
+    { "key": "idempotencyKey", "value": "idem-manual-001" },
+    { "key": "operationId", "value": "op-manual-001" },
+    { "key": "bookingId", "value": "" },
+    { "key": "availableBefore", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "booking-api health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{bookingUrl}}/health", "host": ["{{bookingUrl}}"], "path": ["health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "capacity-api health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{capacityUrl}}/health", "host": ["{{capacityUrl}}"], "path": ["health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bookings (public API v1)",
+      "item": [
+        {
+          "name": "Create booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-User-ID", "value": "{{userId}}" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"slot_id\": \"{{slotId}}\"\n}" },
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            },
+            "description": "Send this twice with the same Idempotency-Key — you should get the same booking id back both times."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('bookingId', body.id);",
+                  "pm.test('status is a v1 value the mobile client accepts', () => {",
+                  "    pm.expect(body.status).to.be.oneOf(['scheduled', 'completed']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create booking (inject post-commit failure)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-User-ID", "value": "{{userId}}" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" },
+              { "key": "X-Challenge-Fault", "value": "post-commit" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"slot_id\": \"{{slotId}}\"\n}" },
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            },
+            "description": "Commits the booking, then fails — the client sees a 500 and retries. Requires CHALLENGE_MODE=true."
+          }
+        },
+        {
+          "name": "Create booking (missing X-User-ID)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"slot_id\": \"{{slotId}}\"\n}" },
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('400 Bad Request', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get booking by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-User-ID", "value": "{{userId}}" }],
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings/{{bookingId}}",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings", "{{bookingId}}"]
+            }
+          }
+        },
+        {
+          "name": "List my bookings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-User-ID", "value": "{{userId}}" }],
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Capacity (internal API)",
+      "item": [
+        {
+          "name": "Get slot",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{capacityUrl}}/internal/v1/slots/{{slotId}}",
+              "host": ["{{capacityUrl}}"],
+              "path": ["internal", "v1", "slots", "{{slotId}}"]
+            },
+            "description": "Seeded slots: slot-munich-0900 (30), slot-munich-1000 (20), slot-berlin-0900 (1)."
+          }
+        },
+        {
+          "name": "Create reservation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operation_id\": \"{{operationId}}\",\n  \"slot_id\": \"{{slotId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{capacityUrl}}/internal/v1/reservations",
+              "host": ["{{capacityUrl}}"],
+              "path": ["internal", "v1", "reservations"]
+            },
+            "description": "Send twice with the same operation_id — capacity must only be consumed once."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('201 Created', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List reservations by operation_id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{capacityUrl}}/internal/v1/reservations?operation_id={{operationId}}",
+              "host": ["{{capacityUrl}}"],
+              "path": ["internal", "v1", "reservations"],
+              "query": [{ "key": "operation_id", "value": "{{operationId}}" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('at most one reservation per operation_id', () => {",
+                  "    pm.expect(pm.response.json().length).to.be.at.most(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Exhaust scarce slot (capacity 1)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operation_id\": \"op-scarce-{{$timestamp}}\",\n  \"slot_id\": \"{{scarceSlotId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{capacityUrl}}/internal/v1/reservations",
+              "host": ["{{capacityUrl}}"],
+              "path": ["internal", "v1", "reservations"]
+            },
+            "description": "First call 201, second 409. Each call uses a fresh operation_id, so this tests capacity, not idempotency."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409 once exhausted', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "INC-1 Regression",
+      "description": "Ordered — run with the Collection Runner. Mirrors scripts/reproduce.sh and asserts the fix.",
+      "item": [
+        {
+          "name": "1. Capacity before",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', 'idem-inc1-' + Date.now());",
+                  "pm.collectionVariables.set('userId', 'user-inc1-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('availableBefore', pm.response.json().available_capacity);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{capacityUrl}}/internal/v1/slots/{{slotId}}",
+              "host": ["{{capacityUrl}}"],
+              "path": ["internal", "v1", "slots", "{{slotId}}"]
+            }
+          }
+        },
+        {
+          "name": "2. Book (fault: post-commit) -> 500",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('client sees a 500', () => pm.response.to.have.status(500));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-User-ID", "value": "{{userId}}" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" },
+              { "key": "X-Challenge-Fault", "value": "post-commit" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"slot_id\": \"{{slotId}}\"\n}" },
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            }
+          }
+        },
+        {
+          "name": "3. Retry same key -> original booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('bookingId', body.id);",
+                  "pm.test('status still parses on the deployed mobile client', () => {",
+                  "    pm.expect(body.status).to.be.oneOf(['scheduled', 'completed']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-User-ID", "value": "{{userId}}" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"slot_id\": \"{{slotId}}\"\n}" },
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            }
+          }
+        },
+        {
+          "name": "4. Exactly one booking exists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const bookings = pm.response.json();",
+                  "pm.test('INC-1: retry did not create a duplicate', () => {",
+                  "    pm.expect(bookings.length).to.eql(1);",
+                  "});",
+                  "pm.test('it is the booking the retry returned', () => {",
+                  "    pm.expect(bookings[0].id).to.eql(pm.collectionVariables.get('bookingId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-User-ID", "value": "{{userId}}" }],
+            "url": {
+              "raw": "{{bookingUrl}}/api/v1/bookings",
+              "host": ["{{bookingUrl}}"],
+              "path": ["api", "v1", "bookings"]
+            }
+          }
+        },
+        {
+          "name": "5. Capacity consumed exactly once",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const before = Number(pm.collectionVariables.get('availableBefore'));",
+                  "const after = pm.response.json().available_capacity;",
+                  "pm.test('INC-1: capacity decremented by 1, not 2', () => {",
+                  "    pm.expect(after).to.eql(before - 1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{capacityUrl}}/internal/v1/slots/{{slotId}}",
+              "host": ["{{capacityUrl}}"],
+              "path": ["internal", "v1", "slots", "{{slotId}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
