@@ -81,6 +81,59 @@ def test_list_bookings_user_isolation(client):
     assert len(resp_b.json()) == 1
 
 
+def test_retry_with_same_idempotency_key_returns_same_booking(client):
+    """INC-1: a retried request must not create a second booking."""
+    first = client.post(
+        "/api/v1/bookings",
+        json={"slot_id": "slot-munich-0900"},
+        headers=HEADERS,
+    )
+    second = client.post(
+        "/api/v1/bookings",
+        json={"slot_id": "slot-munich-0900"},
+        headers=HEADERS,
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+
+    listing = client.get("/api/v1/bookings", headers={"X-User-ID": "user-test-1"})
+    assert len(listing.json()) == 1
+
+
+def test_retry_does_not_reserve_capacity_twice(client, mock_capacity_api):
+    """INC-1: the downstream reservation must be requested only once."""
+    for _ in range(2):
+        client.post(
+            "/api/v1/bookings",
+            json={"slot_id": "slot-munich-0900"},
+            headers=HEADERS,
+        )
+
+    assert mock_capacity_api.call_count == 1
+
+
+def test_retry_after_post_commit_failure_returns_original_booking(client):
+    """INC-1: the incident path -- first attempt commits, then fails."""
+    failed = client.post(
+        "/api/v1/bookings",
+        json={"slot_id": "slot-munich-0900"},
+        headers={**HEADERS, "X-Challenge-Fault": "post-commit"},
+    )
+    assert failed.status_code == 500
+
+    retry = client.post(
+        "/api/v1/bookings",
+        json={"slot_id": "slot-munich-0900"},
+        headers=HEADERS,
+    )
+    assert retry.status_code == 201
+
+    listing = client.get("/api/v1/bookings", headers={"X-User-ID": "user-test-1"})
+    assert len(listing.json()) == 1
+
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
