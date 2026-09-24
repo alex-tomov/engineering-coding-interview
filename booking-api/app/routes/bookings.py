@@ -1,3 +1,5 @@
+import json
+import logging
 import uuid
 
 import httpx
@@ -12,6 +14,8 @@ from app.schemas import CreateBookingRequest
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 # Fixed namespace so a given (user, idempotency key) always maps to the same
 # booking id -- and therefore the same downstream operation_id on a retry.
 BOOKING_NAMESPACE = uuid.UUID("6f8a9c1e-4b3d-4f2a-9e71-2c5d8a0b7f43")
@@ -19,7 +23,10 @@ BOOKING_NAMESPACE = uuid.UUID("6f8a9c1e-4b3d-4f2a-9e71-2c5d8a0b7f43")
 
 def _booking_id_for(user_id: str, idempotency_key: str | None) -> str:
     if idempotency_key:
-        return str(uuid.uuid5(BOOKING_NAMESPACE, f"{user_id}:{idempotency_key}"))
+        # JSON-encoded pair rather than "user:key": a separator inside either
+        # value would otherwise let distinct pairs collide on the primary key.
+        name = json.dumps([user_id, idempotency_key], separators=(",", ":"))
+        return str(uuid.uuid5(BOOKING_NAMESPACE, name))
     return str(uuid.uuid4())
 
 
@@ -54,7 +61,10 @@ def create_booking(
     db: Session = Depends(get_db),
 ):
     user_id = request.headers.get("X-User-ID")
-    idempotency_key = request.headers.get("Idempotency-Key")
+    # An empty header value must mean "absent", not "the empty-string key":
+    # Postgres does not treat '' as NULL-distinct, so storing it would trip the
+    # unique constraint on every later booking by this user.
+    idempotency_key = request.headers.get("Idempotency-Key") or None
 
     if not user_id:
         raise HTTPException(status_code=400, detail="X-User-ID header required")
@@ -63,6 +73,13 @@ def create_booking(
     # the client's Retry safe.
     existing = _find_existing(db, user_id, idempotency_key)
     if existing:
+        if existing.slot_id != body.slot_id:
+            # Same key, different intent -- replaying would confirm a slot the
+            # user did not choose.
+            raise HTTPException(
+                status_code=422,
+                detail="Idempotency-Key was already used for a different slot_id",
+            )
         return _serialize(existing)
 
     booking_id = _booking_id_for(user_id, idempotency_key)
@@ -91,6 +108,14 @@ def create_booking(
             duplicate = _find_existing(db, user_id, idempotency_key)
             if duplicate:
                 return _serialize(duplicate)
+            # Not a same-key race, so the constraint fired for a reason we do
+            # not understand. Log it -- the generic 500 below hides everything.
+            logger.exception(
+                "Unexpected IntegrityError creating booking "
+                "(user_id=%s, booking_id=%s)",
+                user_id,
+                booking_id,
+            )
             raise
         db.refresh(booking)
 
