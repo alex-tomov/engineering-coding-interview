@@ -23,7 +23,9 @@ class Reservation(Base):
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    operation_id: Mapped[str] = mapped_column(String, nullable=False)
+    # The caller's idempotency token: one reservation per operation, so a
+    # retried call cannot consume capacity twice.
+    operation_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     slot_id: Mapped[str] = mapped_column(
         String, ForeignKey("slots.id"), nullable=False
     )
