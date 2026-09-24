@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ from app.models import Reservation, Slot
 from app.schemas import ReservationCreate, ReservationResponse, SlotResponse
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 def _to_response(reservation: Reservation) -> ReservationResponse:
@@ -33,6 +36,14 @@ def create_reservation(
         .first()
     )
     if existing:
+        if existing.slot_id != body.slot_id:
+            # Replaying here would hand the caller a reservation for a slot it
+            # did not ask for, and the two services would disagree about which
+            # seat is held.
+            raise HTTPException(
+                status_code=409,
+                detail="operation_id already reserved a different slot",
+            )
         return _to_response(existing)
 
     slot = db.query(Slot).filter(Slot.id == body.slot_id).first()
@@ -63,6 +74,12 @@ def create_reservation(
         )
         if duplicate:
             return _to_response(duplicate)
+        logger.exception(
+            "Unexpected IntegrityError creating reservation "
+            "(operation_id=%s, slot_id=%s)",
+            body.operation_id,
+            body.slot_id,
+        )
         raise
     db.refresh(reservation)
 
