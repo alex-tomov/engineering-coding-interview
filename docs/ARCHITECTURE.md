@@ -33,10 +33,28 @@ Each service owns its own PostgreSQL database. There is no shared database.
 
 ## Current Assumptions
 
-> **Architecture note (2024-06-14):** The current implementation assumes
-> low request volume. Idempotency handling and concurrent-booking protection
-> were deferred to a future sprint. The `idempotency_key` field is stored
-> for future use but is not currently enforced.
+> **Architecture note (2026-09-24):** Idempotency is now enforced at both
+> service edges — see [ADR 0001](adr/0001-idempotent-booking-creation.md).
+> `booking-api` deduplicates on `(user_id, idempotency_key)`; `capacity-api`
+> deduplicates on `operation_id`. Both are backed by unique constraints.
+>
+> Still outstanding: capacity is never *released*, so a reservation whose
+> booking never committed holds a seat indefinitely (BUG-1); and
+> `capacity-api` still does read-then-decrement without a row lock, so two
+> distinct operations can both take the last seat (FEAT-2).
+
+> **Superseded (2024-06-14):** The current implementation assumes low request
+> volume. Idempotency handling and concurrent-booking protection were deferred
+> to a future sprint. The `idempotency_key` field is stored for future use but
+> is not currently enforced.
+
+## Schema Management
+
+Both services create their schema with `Base.metadata.create_all()` at startup.
+This creates missing tables but **does not alter existing ones** — a newly added
+constraint will not appear on a database that already has the table. Locally,
+`make reset` (which drops volumes) is required. A production deployment needs a
+migration tool; this repository has none.
 
 ## API Versioning
 

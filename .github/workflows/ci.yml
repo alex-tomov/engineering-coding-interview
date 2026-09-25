@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# scripts/wait-for-healthy.sh resolves containers by project-prefixed name,
+# which otherwise depends on the checkout directory.
+env:
+  COMPOSE_PROJECT_NAME: engineering-coding-interview
+
+jobs:
+  contract:
+    name: Mobile client contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No services needed -- these are pure response-parsing tests, so they
+      # run in parallel with the main job and fail fast on a v1 break.
+      - name: Run legacy-mobile contract tests
+        run: |
+          docker build -t legacy-mobile-test ./legacy-mobile
+          docker run --rm legacy-mobile-test pytest tests/ -v
+
+  check:
+    name: Lint, typecheck, tests, INC-1 regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start services
+        run: make up
+
+      - name: Lint
+        run: make lint
+
+      - name: Typecheck
+        run: make typecheck
+
+      # Runs before the unit tests on purpose: the pytest suites drop_all()
+      # against the services' own databases, which leaves the running stack
+      # without tables. See docs/ARCHITECTURE.md.
+      # scripts/reproduce.sh exits non-zero if a retry produces more than one
+      # booking, so the exit code is the assertion.
+      - name: INC-1 regression guard
+        run: make reproduce
+
+      - name: Unit tests
+        run: make test
+
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v

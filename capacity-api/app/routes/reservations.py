@@ -1,7 +1,9 @@
+import logging
 from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -10,11 +12,40 @@ from app.schemas import ReservationCreate, ReservationResponse, SlotResponse
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
+
+def _to_response(reservation: Reservation) -> ReservationResponse:
+    return ReservationResponse(
+        reservation_id=reservation.id,
+        operation_id=reservation.operation_id,
+        slot_id=reservation.slot_id,
+        status=reservation.status,
+    )
+
 
 @router.post("/internal/v1/reservations", status_code=201)
 def create_reservation(
     body: ReservationCreate, db: Session = Depends(get_db)
 ) -> ReservationResponse:
+    # Replay an earlier reservation for the same operation instead of
+    # consuming capacity again.
+    existing = (
+        db.query(Reservation)
+        .filter(Reservation.operation_id == body.operation_id)
+        .first()
+    )
+    if existing:
+        if existing.slot_id != body.slot_id:
+            # Replaying here would hand the caller a reservation for a slot it
+            # did not ask for, and the two services would disagree about which
+            # seat is held.
+            raise HTTPException(
+                status_code=409,
+                detail="operation_id already reserved a different slot",
+            )
+        return _to_response(existing)
+
     slot = db.query(Slot).filter(Slot.id == body.slot_id).first()
     if not slot:
         raise HTTPException(status_code=404, detail="Slot not found")
@@ -30,15 +61,29 @@ def create_reservation(
     )
     db.add(reservation)
     slot.available_capacity -= 1
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # A concurrent call for the same operation won the race; the lookup
+        # above is check-then-act, and the unique constraint closes it.
+        db.rollback()
+        duplicate = (
+            db.query(Reservation)
+            .filter(Reservation.operation_id == body.operation_id)
+            .first()
+        )
+        if duplicate:
+            return _to_response(duplicate)
+        logger.exception(
+            "Unexpected IntegrityError creating reservation "
+            "(operation_id=%s, slot_id=%s)",
+            body.operation_id,
+            body.slot_id,
+        )
+        raise
     db.refresh(reservation)
 
-    return ReservationResponse(
-        reservation_id=reservation.id,
-        operation_id=reservation.operation_id,
-        slot_id=reservation.slot_id,
-        status=reservation.status,
-    )
+    return _to_response(reservation)
 
 
 @router.get("/internal/v1/reservations")

@@ -68,17 +68,23 @@ echo ""
 echo "================================================================"
 echo "  RESULT"
 echo "================================================================"
-if [ "$BOOKING_COUNT" = "2" ]; then
+if [ "$BOOKING_COUNT" = "1" ]; then
+    echo ""
+    echo "  PASS -- the retry was deduplicated"
+    echo ""
+    echo "  Bookings created: $BOOKING_COUNT (expected: 1)"
+    echo "  The idempotency key replayed the original booking."
+    echo "  Capacity was consumed once."
+    echo ""
+    echo "================================================================"
+else
     echo ""
     echo "  !! INCIDENT REPRODUCED"
     echo ""
     echo "  Bookings created: $BOOKING_COUNT (expected: 1)"
-    echo "  The same idempotency key produced two separate bookings."
-    echo "  Capacity was consumed twice."
-else
+    echo "  The same idempotency key produced separate bookings."
+    echo "  Capacity was consumed more than once."
     echo ""
-    echo "  Bookings created: $BOOKING_COUNT"
-    echo "  (Expected 2 for reproduction -- check service logs)"
+    echo "================================================================"
+    exit 1
 fi
-echo ""
-echo "================================================================"

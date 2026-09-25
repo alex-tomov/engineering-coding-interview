@@ -32,6 +32,62 @@ def test_create_reservation(client, db_session):
     assert "reservation_id" in data
 
 
+def test_reservation_is_idempotent_on_operation_id(client, db_session):
+    """A retried reservation must not consume capacity twice."""
+    db_session.add(
+        Slot(
+            id="slot-idem",
+            location="Munich",
+            time="09:00",
+            total_capacity=5,
+            available_capacity=5,
+        )
+    )
+    db_session.commit()
+
+    payload = {"operation_id": "op-retry-001", "slot_id": "slot-idem"}
+    first = client.post("/internal/v1/reservations", json=payload)
+    second = client.post("/internal/v1/reservations", json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["reservation_id"] == first.json()["reservation_id"]
+
+    slot = client.get("/internal/v1/slots/slot-idem").json()
+    assert slot["available_capacity"] == 4
+    assert slot["reservation_count"] == 1
+
+
+def test_same_operation_id_with_different_slot_is_rejected(client, db_session):
+    """Replaying across slots would desync booking-api from capacity-api."""
+    for slot_id in ("slot-a", "slot-b"):
+        db_session.add(
+            Slot(
+                id=slot_id,
+                location="Test",
+                time="10:00",
+                total_capacity=5,
+                available_capacity=5,
+            )
+        )
+    db_session.commit()
+
+    first = client.post(
+        "/internal/v1/reservations",
+        json={"operation_id": "op-mismatch", "slot_id": "slot-a"},
+    )
+    assert first.status_code == 201
+
+    second = client.post(
+        "/internal/v1/reservations",
+        json={"operation_id": "op-mismatch", "slot_id": "slot-b"},
+    )
+    assert second.status_code == 409
+
+    slot_b = client.get("/internal/v1/slots/slot-b").json()
+    assert slot_b["available_capacity"] == 5
+
+
 def test_slot_not_found(client):
     response = client.post(
         "/internal/v1/reservations",
